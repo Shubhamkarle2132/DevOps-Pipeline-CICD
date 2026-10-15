@@ -1,10 +1,14 @@
-﻿name: IncidentFlow CI/CD
+﻿
+name: IncidentFlow CI/CD
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test-and-build:
@@ -34,3 +38,71 @@ jobs:
           context: .
           push: false
           tags: incidentflow-lite:ci
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test-and-build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::757627337639:role/GitHubActions-IncidentFlow-Deploy
+          aws-region: ap-south-1
+
+      - name: Deploy through AWS Systems Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids i-0841bf6346dcf2c39 \
+            --document-name AWS-RunShellScript \
+            --parameters 'commands=[
+              "set -e",
+              "cd /opt/incidentflow",
+              "git fetch origin main",
+              "git reset --hard origin/main",
+              "sudo docker build -t incidentflow-lite:1.0 .",
+              "sudo docker rm -f incidentflow-app || true",
+              "sudo docker run -d --name incidentflow-app --restart unless-stopped -p 80:5000 -v incidentflow-data:/data incidentflow-lite:1.0",
+              "curl --fail --silent http://localhost/health"
+            ]' \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "Deployment command: $COMMAND_ID"
+
+          for attempt in $(seq 1 30); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id i-0841bf6346dcf2c39 \
+              --query 'Status' \
+              --output text 2>/dev/null || true)
+
+            echo "Deployment status: ${STATUS:-Pending}"
+
+            if [ "$STATUS" = "Success" ]; then
+              echo "Deployment completed successfully."
+              exit 0
+            fi
+
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id i-0841bf6346dcf2c39 \
+                --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+                --output json
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for deployment. Check Systems Manager Run Command in AWS."
+          exit 1
