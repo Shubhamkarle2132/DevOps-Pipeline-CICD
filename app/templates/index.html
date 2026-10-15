@@ -1,0 +1,140 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IncidentFlow Lite</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#131b2e;--line:#283550;--muted:#9aa9c2;--text:#edf3ff;--blue:#6ca8ff;--green:#45d6a1}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Arial,sans-serif}
+header{border-bottom:1px solid var(--line);padding:20px 5%;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.brand{font-size:21px;font-weight:700}.brand span{color:var(--blue)}
+.tag{color:var(--green);font-size:12px}
+main{max-width:1180px;margin:34px auto;padding:0 20px}
+h1{margin:0 0 7px;font-size:clamp(26px,4vw,36px)}
+.muted{color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:25px 0}
+.panel,.stat{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:19px}
+.stat strong{display:block;font-size:29px;margin-top:6px}
+.layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:start}
+h2{font-size:18px;margin:0 0 17px}
+label{display:block;margin:13px 0 6px;color:var(--muted)}
+input,textarea,select{width:100%;padding:11px;border-radius:8px;border:1px solid var(--line);background:#0d1426;color:var(--text);font:inherit}
+textarea{min-height:95px;resize:vertical}
+button{border:0;border-radius:8px;padding:10px 13px;cursor:pointer;font-weight:700;font:inherit}
+.primary{background:var(--blue);color:#071226;width:100%;margin-top:16px}
+.small{background:#263754;color:var(--text);font-size:12px}
+.danger{background:#48252f;color:#ffb7c4}
+.incident{border:1px solid var(--line);border-radius:10px;padding:15px;margin-top:12px}
+.incident-top{display:flex;justify-content:space-between;gap:10px}
+.incident h3{margin:0 0 7px;font-size:16px}
+.pill{font-size:11px;padding:4px 8px;border-radius:20px;white-space:nowrap}
+.High,.Critical{background:#4b2932;color:#ffabb8}
+.Medium{background:#4b3e23;color:#ffd780}
+.Low{background:#1c423b;color:#8ae8c5}
+.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.empty{padding:28px 0;text-align:center;color:var(--muted)}
+#message{margin-top:12px;font-size:13px}
+footer{text-align:center;color:var(--muted);padding:28px 12px;font-size:12px}
+@media(max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:1fr}header{padding:17px 20px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Incident<span>Flow</span> Lite</div>
+  <div class="tag">● Incident service</div>
+</header>
+<main>
+  <h1>Incident management</h1>
+  <div class="muted">Track service issues, prioritize response, and keep incident records in one place.</div>
+  <section class="stats">
+    <div class="stat"><span class="muted">Total incidents</span><strong id="total">0</strong></div>
+    <div class="stat"><span class="muted">Open</span><strong id="open">0</strong></div>
+    <div class="stat"><span class="muted">In progress</span><strong id="progress">0</strong></div>
+    <div class="stat"><span class="muted">Resolved</span><strong id="resolved">0</strong></div>
+  </section>
+  <section class="layout">
+    <div class="panel">
+      <h2>Report an incident</h2>
+      <form id="incident-form">
+        <label for="title">Incident title *</label>
+        <input id="title" maxlength="160" required placeholder="e.g. Checkout service unavailable">
+        <label for="description">Description</label>
+        <textarea id="description" maxlength="2000" placeholder="Describe the issue and its impact"></textarea>
+        <label for="severity">Severity</label>
+        <select id="severity"><option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option></select>
+        <button class="primary" type="submit">+ Create incident</button>
+        <div id="message" role="status"></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Incident queue</h2>
+      <div id="incident-list"><div class="empty">Loading incidents…</div></div>
+    </div>
+  </section>
+</main>
+<footer>IncidentFlow Lite · Python · Flask · SQLite · Incident tracking</footer>
+<script>
+const list=document.getElementById("incident-list");
+const message=document.getElementById("message");
+async function api(url,options={}){
+ const response=await fetch(url,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
+ const data=await response.json();
+ if(!response.ok)throw new Error(data.error||"Request failed");
+ return data;
+}
+function escapeHTML(value){
+ return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function renderIncident(item){
+ const description=item.description?`<p class="muted">${escapeHTML(item.description)}</p>`:"";
+ return `<article class="incident">
+ <div class="incident-top"><div><h3>#${item.id} · ${escapeHTML(item.title)}</h3>
+ <div class="muted">Created ${escapeHTML(new Date(item.created_at).toLocaleString())}</div></div>
+ <span class="pill ${escapeHTML(item.severity)}">${escapeHTML(item.severity)}</span></div>
+ ${description}<div class="muted">Status: ${escapeHTML(item.status)}</div>
+ <div class="actions">
+ <button class="small" data-status="Open" data-id="${item.id}">Open</button>
+ <button class="small" data-status="In Progress" data-id="${item.id}">In progress</button>
+ <button class="small" data-status="Resolved" data-id="${item.id}">Resolve</button>
+ <button class="small danger" data-delete="${item.id}">Delete</button>
+ </div></article>`;
+}
+async function refresh(){
+ try{
+  const items=await api("/api/incidents");
+  document.getElementById("total").textContent=items.length;
+  document.getElementById("open").textContent=items.filter(i=>i.status==="Open").length;
+  document.getElementById("progress").textContent=items.filter(i=>i.status==="In Progress").length;
+  document.getElementById("resolved").textContent=items.filter(i=>i.status==="Resolved").length;
+  list.innerHTML=items.length?items.map(renderIncident).join(""):'<div class="empty">No incidents yet. Create your first incident to get started.</div>';
+ }catch(error){list.innerHTML='<div class="empty">Unable to load incidents. Check the application server.</div>';}
+}
+document.getElementById("incident-form").addEventListener("submit",async event=>{
+ event.preventDefault();message.textContent="";
+ try{
+  await api("/api/incidents",{method:"POST",body:JSON.stringify({
+   title:document.getElementById("title").value,
+   description:document.getElementById("description").value,
+   severity:document.getElementById("severity").value
+  })});
+  event.target.reset();message.textContent="Incident created successfully.";await refresh();
+ }catch(error){message.textContent=error.message;}
+});
+list.addEventListener("click",async event=>{
+ const button=event.target.closest("button");if(!button)return;
+ try{
+  if(button.dataset.status){
+   await api(`/api/incidents/${button.dataset.id}`,{method:"PATCH",body:JSON.stringify({status:button.dataset.status})});
+  }else if(button.dataset.delete){
+   if(!confirm("Delete this incident permanently?"))return;
+   await api(`/api/incidents/${button.dataset.delete}`,{method:"DELETE"});
+  }
+  await refresh();
+ }catch(error){alert(error.message);}
+});
+refresh();
+</script>
+</body>
+</html>
