@@ -4,3 +4,9 @@
 crash.log
 crash.*.log
 *.tfvars
+# Terraform saved plans
+tfplan
+*.tfplan
+
+# Private keys
+*.pem
